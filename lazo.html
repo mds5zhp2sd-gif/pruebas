@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Lazo de cuerda</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background: radial-gradient(ellipse at 50% 40%, #f6f1e8 0%, #ddd3c2 100%); font-family: Montserrat, sans-serif; }
+  #wrap { position:fixed; inset:0; touch-action:none; }
+  #ui { position:fixed; bottom:26px; left:0; right:0; text-align:center; z-index:2; }
+  button { font: 500 12px Montserrat, sans-serif; letter-spacing:3px; text-transform:uppercase; padding:13px 28px; border:1px solid #9c7a54; background:#fffdf8; color:#3a2f26; border-radius:40px; cursor:pointer; box-shadow:0 8px 18px -10px rgba(50,30,10,.6); }
+  #err { position:fixed; top:12px; left:12px; right:12px; color:#8a1f1f; background:#fff; font:13px monospace; padding:10px; display:none; z-index:3; }
+</style>
+</head>
+<body>
+<div id="wrap"></div>
+<div id="ui"><button id="toggle">Desatar</button></div>
+<div id="err"></div>
+
+<script>
+let target = 0;
+const btn = document.getElementById('toggle');
+btn.addEventListener('click', () => { target = target ? 0 : 1; btn.textContent = target ? 'Atar' : 'Desatar'; });
+function showError(m) { const e = document.getElementById('err'); e.style.display = 'block'; e.textContent = 'Error: ' + m; }
+addEventListener('error', e => showError(e.message));
+</script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  if (typeof THREE === 'undefined') { showError('No se pudo cargar Three.js'); return; }
+
+  const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  document.getElementById('wrap').appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(30, innerWidth/innerHeight, .1, 50);
+  camera.position.set(0, -0.5, 4.2);
+  camera.lookAt(0, -0.1, 0);
+
+  // Giro con el dedo o el ratón
+  const pivot = new THREE.Group(); scene.add(pivot);
+  let rotX = -.15, rotY = 0, dragging = false, lx = 0, ly = 0;
+  renderer.domElement.addEventListener('pointerdown', e => { dragging = true; lx = e.clientX; ly = e.clientY; });
+  addEventListener('pointerup', () => dragging = false);
+  addEventListener('pointermove', e => {
+    if (!dragging) return;
+    rotY += (e.clientX - lx) * .006;
+    rotX = Math.max(-.7, Math.min(.7, rotX + (e.clientY - ly) * .006));
+    lx = e.clientX; ly = e.clientY;
+  });
+
+  // Luces: una principal con sombras suaves, relleno cálido y luz de ambiente
+  scene.add(new THREE.HemisphereLight(0xfff4e2, 0x7a6650, .75));
+  const key = new THREE.DirectionalLight(0xfff6ea, 1.9);
+  key.position.set(-2.4, 3.6, 3.2);
+  key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.camera.left = -2; key.shadow.camera.right = 2;
+  key.shadow.camera.top = 2; key.shadow.camera.bottom = -2;
+  key.shadow.radius = 5; key.shadow.bias = -0.0004;
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0xffe2c2, .35);
+  fill.position.set(2.5, 1, 2); scene.add(fill);
+
+  // Superficie que solo recibe sombra (así el fondo queda limpio)
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), new THREE.ShadowMaterial({ opacity:.28 }));
+  ground.position.z = -0.001; ground.receiveShadow = true;
+  scene.add(ground);
+
+  // Materiales: cordón de yute con relieve y un poco de brillo de fibra
+  const cordTex = makeCordTexture();
+  const cordMat = new THREE.MeshStandardMaterial({ color:0xffffff, map:cordTex, bumpMap:cordTex, bumpScale:.8, roughness:.82, metalness:0 });
+  const darkMat = new THREE.MeshStandardMaterial({ color:0x6f5536, roughness:.9 });
+
+  const bow = new THREE.Group(); pivot.add(bow);
+
+  // Puntos de control: lazo anudado y lazo suelto sobre la mesa
+  const knotted = {
+    loopL: [[0,0,0],[-.25,.32,.10],[-.66,.38,.10],[-.80,.02,.06],[-.56,-.24,.04],[-.18,-.08,.02]],
+    loopR: [[0,0,0],[.25,.32,.10],[.66,.38,.10],[.80,.02,.06],[.56,-.24,.04],[.18,-.08,.02]],
+    tailL: [[-.03,-.03,.02],[-.14,-.34,.06],[-.27,-.66,.10],[-.38,-.94,.08],[-.42,-1.06,.05]],
+    tailR: [[.03,-.03,.02],[.16,-.38,.06],[.32,-.70,.10],[.46,-.96,.08],[.54,-1.10,.05]]
+  };
+  const loose = {
+    loopL: [[0,0,.02],[-.34,.28,.04],[-.86,.46,.04],[-1.12,.10,.03],[-.86,-.32,.03],[-.40,-.14,.02]],
+    loopR: [[0,0,.02],[.38,.30,.04],[.88,.52,.04],[1.08,.12,.03],[.82,-.40,.03],[.34,-.16,.02]],
+    tailL: [[-.03,-.03,.02],[-.32,-.40,.03],[-.56,-.76,.03],[-.84,-.94,.03],[-.96,-1.14,.03]],
+    tailR: [[.03,-.03,.02],[.40,-.56,.03],[.60,-.90,.03],[.84,-1.10,.03],[.96,-1.32,.03]]
+  };
+
+  const STRANDS = 3;   // hebras que forman el cordón
+  const TURNS = 4;     // vueltas de trenzado a lo largo de cada tramo
+  const CORE_R = .016, STRAND_R = .0095, SEGS = 220;
+  const groups = {};
+
+  function buildCurve(pts, closed) {
+    return new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(p[0], p[1], p[2])), closed, 'centripetal');
+  }
+
+  // Cada cordón es un núcleo + tres hebras que se enrollan alrededor
+  function buildCord(key, pts, closed) {
+    if (groups[key]) { bow.remove(groups[key]); groups[key].traverse(o => o.geometry && o.geometry.dispose()); }
+    const g = new THREE.Group();
+    const curve = buildCurve(pts, closed);
+    const frames = curve.computeFrenetFrames(SEGS, closed);
+    const core = new THREE.TubeGeometry(curve, SEGS, CORE_R, 10, closed);
+    const coreMesh = new THREE.Mesh(core, darkMat);
+    coreMesh.castShadow = true; coreMesh.receiveShadow = true;
+    g.add(coreMesh);
+    for (let s = 0; s < STRANDS; s++) {
+      const phase = s * Math.PI * 2 / STRANDS;
+      const helix = [];
+      for (let i = 0; i <= SEGS; i++) {
+        const t = i / SEGS;
+        const a = phase + TURNS * Math.PI * 2 * t;
+        const c = Math.cos(a) * (CORE_R * .9), sn = Math.sin(a) * (CORE_R * .9);
+        const p = curve.getPointAt(t);
+        const n = frames.normals[i], b = frames.binormals[i];
+        helix.push(new THREE.Vector3(
+          p.x + n.x * c + b.x * sn,
+          p.y + n.y * c + b.y * sn,
+          p.z + n.z * c + b.z * sn
+        ));
+      }
+      const hc = new THREE.CatmullRomCurve3(helix, false, 'centripetal');
+      const mesh = new THREE.Mesh(new THREE.TubeGeometry(hc, SEGS * 2, STRAND_R, 8, false), cordMat);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      g.add(mesh);
+    }
+    groups[key] = g;
+    bow.add(g);
+  }
+
+  // Nudo central: dos vueltas de cordón alrededor de un punto
+  const knot = new THREE.Group(); bow.add(knot);
+  const wrapCurve = new THREE.CatmullRomCurve3(
+    Array.from({ length: 49 }, (_, i) => {
+      const a = i / 48 * Math.PI * 4;
+      return new THREE.Vector3(Math.cos(a) * .07, Math.sin(a) * .035 + Math.sin(a * 2) * .012, Math.sin(a) * .045 + .02);
+    }), true);
+  const wrapMesh = new THREE.Mesh(new THREE.TubeGeometry(wrapCurve, 120, .018, 10, true), cordMat);
+  wrapMesh.castShadow = true; knot.add(wrapMesh);
+  const knotBall = new THREE.Mesh(new THREE.SphereGeometry(.04, 20, 16), cordMat);
+  knotBall.scale.set(1.15, .85, 1); knotBall.position.set(0, 0, .05);
+  knotBall.castShadow = true; knot.add(knotBall);
+
+  let progress = 0;
+  const duration = 1.8;
+  const ease = t => t < .5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+
+  function applyProgress(p) {
+    const e = ease(p);
+    const lift = Math.sin(Math.PI * e);
+    for (const k of Object.keys(knotted)) {
+      const pts = knotted[k].map((a, i) => {
+        const b = loose[k][i];
+        return [
+          a[0] + (b[0] - a[0]) * e + Math.sin(e*Math.PI + i) * .03 * lift,
+          a[1] + (b[1] - a[1]) * e,
+          a[2] + (b[2] - a[2]) * e + lift * (.08 + i*.015)
+        ];
+      });
+      buildCord(k, pts, k.startsWith('loop'));
+    }
+    knot.scale.setScalar(Math.max(.001, 1 - e * .8));
+    knot.visible = e < .97;
+  }
+  applyProgress(0);
+
+  let last = performance.now();
+  function animate(now) {
+    requestAnimationFrame(animate);
+    const dt = Math.min((now - last)/1000, .05); last = now;
+    if (progress < target) progress = Math.min(target, progress + dt/duration);
+    else if (progress > target) progress = Math.max(target, progress - dt/duration);
+    applyProgress(progress);
+    pivot.rotation.set(rotX, rotY, 0);
+    renderer.render(scene, camera);
+  }
+  requestAnimationFrame(animate);
+
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // Textura de cordón: fibras diagonales con brillo y sombra, usada también como relieve
+  function makeCordTexture() {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 256;
+    const g = c.getContext('2d');
+    g.fillStyle = '#c4a57a'; g.fillRect(0,0,256,256);
+    for (let i = -256; i < 512; i += 5) {
+      const grad = g.createLinearGradient(i, 0, i+10, 256);
+      grad.addColorStop(0, '#7c5d36'); grad.addColorStop(.35, '#e8d6b0'); grad.addColorStop(.6, '#b48f5e'); grad.addColorStop(1, '#6e5030');
+      g.strokeStyle = grad; g.lineWidth = 3.2;
+      g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 256, 256); g.stroke();
+    }
+    g.globalAlpha = .35;
+    for (let i = 0; i < 400; i++) {
+      g.strokeStyle = Math.random() < .5 ? '#f7ecd2' : '#4e3620';
+      const x = Math.random()*256, y = Math.random()*256;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + (Math.random()-.5)*14, y + (Math.random()-.5)*14); g.stroke();
+    }
+    g.globalAlpha = 1;
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(10, 1);
+    t.encoding = THREE.sRGBEncoding;
+    return t;
+  }
+})();
+</script>
+</body>
+</html>
