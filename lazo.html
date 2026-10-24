@@ -170,6 +170,12 @@ addEventListener('error', e => showError(e.message));
     }
     knot.scale.setScalar(Math.max(.001, 1 - e * .8));
     knot.visible = e < .97;
+    // Al final el cordón cae fuera de la tarjeta y se desvanece: no queda nada
+    const fade = 1 - Math.min(1, Math.max(0, (e - .5) / .45));
+    bow.position.set(0, -e * .35, e * .15);
+    cordMat.transparent = darkMat.transparent = true;
+    cordMat.opacity = darkMat.opacity = fade;
+    bow.visible = fade > .01;
   }
   applyProgress(0);
 
