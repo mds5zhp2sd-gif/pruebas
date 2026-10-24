@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Invitación de boda 3D</title>
+<style>
+  html, body { margin:0; height:100%; background: radial-gradient(ellipse at 50% 35%, #f4efe6 0%, #d9cfbf 100%); overflow:hidden; font-family: Montserrat, sans-serif; }
+  #wrap { position:fixed; inset:0; }
+  #ui { position:fixed; bottom:28px; left:0; right:0; text-align:center; }
+  button {
+    font: 500 12px Montserrat, sans-serif; letter-spacing:3px; text-transform:uppercase;
+    padding:13px 28px; border:1px solid #9c7a54; background:#fffdf8; color:#3a2f26;
+    border-radius:40px; cursor:pointer; box-shadow:0 8px 18px -10px rgba(50,30,10,.6);
+  }
+  button:active { transform: translateY(1px); }
+  #hint { margin-top:10px; font-size:11px; color:#7a6c60; letter-spacing:1px; }
+</style>
+</head>
+<body>
+<div id="wrap"></div>
+<div id="ui">
+  <button id="toggle">Desatar</button>
+  <div id="hint">Arrastra para girar · pellizca para acercar</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/controls/OrbitControls.js"></script>
+<script>
+(() => {
+  const wrap = document.getElementById('wrap');
+  const renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  wrap.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(32, innerWidth/innerHeight, .1, 50);
+  camera.position.set(0, -1.1, 4.4);
+  camera.lookAt(0, -0.05, 0);
+
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.enablePan = false;
+  controls.minDistance = 2.4; controls.maxDistance = 6;
+  controls.maxPolarAngle = Math.PI * .72; controls.minPolarAngle = Math.PI * .15;
+  controls.target.set(0, -0.05, 0);
+
+  // ---------- Luces ----------
+  scene.add(new THREE.HemisphereLight(0xfff6e8, 0x8a7560, .9));
+  const key = new THREE.DirectionalLight(0xffffff, 1.6);
+  key.position.set(-2.2, 3.2, 3.5);
+  key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.camera.left = -2; key.shadow.camera.right = 2;
+  key.shadow.camera.top = 2; key.shadow.camera.bottom = -2;
+  key.shadow.radius = 6; key.shadow.bias = -0.0005;
+  scene.add(key);
+
+  // ---------- Mesa / sombra de contacto ----------
+  const table = new THREE.Mesh(
+    new THREE.PlaneGeometry(14, 14),
+    new THREE.MeshStandardMaterial({ color:0xe9e2d6, roughness:.95 })
+  );
+  table.receiveShadow = true;
+  table.position.z = -0.02;
+  scene.add(table);
+
+  // ---------- Sobre kraft (detrás) ----------
+  const kraftTex = makeKraftTexture();
+  const kraft = new THREE.Mesh(
+    new THREE.BoxGeometry(1.62, 2.18, .03),
+    new THREE.MeshStandardMaterial({ map:kraftTex, roughness:.9 })
+  );
+  kraft.position.set(0, 0, .015); kraft.castShadow = true; kraft.receiveShadow = true;
+  scene.add(kraft);
+
+  // ---------- Tarjeta de papel con texto ----------
+  const cardTex = makeCardTexture();
+  const card = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.42, 1.98),
+    new THREE.MeshStandardMaterial({ map:cardTex, roughness:.8 })
+  );
+  card.position.set(0, 0, .036); card.receiveShadow = true;
+  scene.add(card);
+
+  // ---------- Cuerda ----------
+  const twineTex = makeTwineTexture();
+  const twineMat = new THREE.MeshStandardMaterial({ map:twineTex, roughness:.92, metalness:0 });
+  const bowGroup = new THREE.Group();
+  scene.add(bowGroup);
+
+  // Estado anudado (puntos de control) y estado desatado (sobre el papel)
+  const knotted = {
+    loopL: [[0,0,.10],[-.22,.30,.20],[-.60,.36,.17],[-.74,.02,.12],[-.52,-.22,.08],[-.18,-.08,.06]],
+    loopR: [[0,0,.10],[.22,.30,.20],[.60,.36,.17],[.74,.02,.12],[.52,-.22,.08],[.18,-.08,.06]],
+    tailL: [[-.02,-.02,.10],[-.12,-.32,.16],[-.24,-.62,.22],[-.36,-.92,.18],[-.40,-1.02,.12]],
+    tailR: [[.02,-.02,.10],[.14,-.36,.16],[.30,-.66,.22],[.44,-.94,.20],[.52,-1.08,.12]]
+  };
+  const loose = {
+    loopL: [[0,0,.05],[-.30,.25,.07],[-.78,.42,.07],[-1.05,.10,.06],[-.80,-.30,.05],[-.36,-.12,.05]],
+    loopR: [[0,0,.05],[.36,.30,.07],[.82,.50,.07],[1.02,.12,.06],[.76,-.38,.05],[.30,-.14,.05]],
+    tailL: [[-.02,-.02,.05],[-.30,-.38,.06],[-.52,-.72,.07],[-.80,-.90,.07],[-.92,-1.10,.06]],
+    tailR: [[.02,-.02,.05],[.36,-.54,.06],[.56,-.86,.07],[.80,-1.06,.07],[.92,-1.28,.06]]
+  };
+
+  const cloneSet = s => Object.fromEntries(Object.entries(s).map(([k,v]) => [k, v.map(p => p.slice())]));
+  let cur = cloneSet(knotted);
+  const meshes = {};
+  const r = .028; // radio de la cuerda
+
+  function buildTube(key, pts, closed) {
+    const vecs = pts.map(p => new THREE.Vector3(p[0], p[1], p[2]));
+    const curve = new THREE.CatmullRomCurve3(vecs, closed, 'catmullrom', .5);
+    const geo = new THREE.TubeGeometry(curve, 220, r, 12, closed);
+    if (!meshes[key]) {
+      meshes[key] = new THREE.Mesh(geo, twineMat);
+      meshes[key].castShadow = true; meshes[key].receiveShadow = true;
+      bowGroup.add(meshes[key]);
+    } else {
+      meshes[key].geometry.dispose();
+      meshes[key].geometry = geo;
+    }
+  }
+
+  function rebuild() {
+    buildTube('loopL', cur.loopL, true);
+    buildTube('loopR', cur.loopR, true);
+    buildTube('tailL', cur.tailL, false);
+    buildTube('tailR', cur.tailR, false);
+  }
+
+  // Nudo central: pequeña esfera con textura de cuerda, más un "bulto" envolvente
+  const knotMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(.055, 24, 18),
+    new THREE.MeshStandardMaterial({ map:twineTex, roughness:.95 })
+  );
+  knotMesh.scale.set(1.2, .9, 1);
+  knotMesh.position.set(0, 0, .11);
+  knotMesh.castShadow = true;
+  bowGroup.add(knotMesh);
+
+  rebuild();
+
+  // ---------- Animación de desatado ----------
+  let progress = 0, target = 0;
+  const duration = 1.8;
+  const ease = t => t < .5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+
+  function applyProgress(p) {
+    const e = ease(p);
+    const lift = Math.sin(Math.PI * e); // se levanta a mitad de camino
+    for (const k of Object.keys(cur)) {
+      cur[k] = knotted[k].map((a, i) => {
+        const b = loose[k][i];
+        const z = a[2] + (b[2] - a[2]) * e + lift * (0.12 + i*0.02);
+        return [
+          a[0] + (b[0] - a[0]) * e + Math.sin(e*Math.PI + i) * 0.04 * lift,
+          a[1] + (b[1] - a[1]) * e,
+          z
+        ];
+      });
+    }
+    rebuild();
+    knotMesh.material.opacity = 1;
+    knotMesh.scale.setScalar(1 - e * .6);
+    knotMesh.position.z = .11 - e * .08;
+    knotMesh.visible = e < .95;
+  }
+
+  const btn = document.getElementById('toggle');
+  btn.addEventListener('click', () => {
+    target = target === 0 ? 1 : 0;
+    btn.textContent = target ? 'Atar' : 'Desatar';
+  });
+
+  // ---------- Bucle ----------
+  let last = performance.now();
+  function animate(now) {
+    requestAnimationFrame(animate);
+    const dt = Math.min((now - last)/1000, .05); last = now;
+    const step = dt / duration;
+    if (progress < target) progress = Math.min(target, progress + step);
+    else if (progress > target) progress = Math.max(target, progress - step);
+    if (progress !== animate._last) { applyProgress(progress); animate._last = progress; }
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate._last = -1;
+  requestAnimationFrame(animate);
+
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // ---------- Texturas ----------
+  function makeTwineTexture() {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 256;
+    const g = c.getContext('2d');
+    g.fillStyle = '#b8925f'; g.fillRect(0,0,256,256);
+    // hebras trenzadas en diagonal, claro/oscuro
+    for (let i = -256; i < 512; i += 7) {
+      const grad = g.createLinearGradient(i, 0, i+12, 256);
+      grad.addColorStop(0, '#8a6638'); grad.addColorStop(.5, '#e7cf9e'); grad.addColorStop(1, '#8a6638');
+      g.strokeStyle = grad; g.lineWidth = 6;
+      g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 256, 256); g.stroke();
+    }
+    // fibras sueltas
+    g.globalAlpha = .25;
+    for (let i = 0; i < 260; i++) {
+      g.strokeStyle = Math.random() < .5 ? '#f5e6c4' : '#5e4224';
+      g.beginPath(); const x = Math.random()*256, y = Math.random()*256;
+      g.moveTo(x, y); g.lineTo(x + (Math.random()-.5)*20, y + (Math.random()-.5)*20); g.stroke();
+    }
+    g.globalAlpha = 1;
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(9, 1.2);
+    t.encoding = THREE.sRGBEncoding;
+    return t;
+  }
+
+  function makeKraftTexture() {
+    const c = document.createElement('canvas'); c.width = 512; c.height = 512;
+    const g = c.getContext('2d');
+    g.fillStyle = '#c59f72'; g.fillRect(0,0,512,512);
+    for (let i = 0; i < 9000; i++) {
+      g.fillStyle = `rgba(${Math.random()<.5?'90,60,30':'230,200,160'},${Math.random()*.08})`;
+      g.fillRect(Math.random()*512, Math.random()*512, 1 + Math.random()*2, 1);
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding; return t;
+  }
+
+  function makeCardTexture() {
+    const W = 1024, H = 1434;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fdfbf5'; g.fillRect(0,0,W,H);
+    g.fillStyle = 'rgba(120,90,60,.03)';
+    for (let y=0;y<H;y+=3) for (let x=0;x<W;x+=3) if (Math.random()<.5) g.fillRect(x,y,1,1);
+
+    const ink = '#2f2a25', soft = '#6e625a';
+    const center = (txt, y, font, color=ink, ls=0) => {
+      g.font = font; g.fillStyle = color; g.textAlign = 'center';
+      if ('letterSpacing' in g) g.letterSpacing = ls + 'px';
+      g.fillText(txt, W/2, y);
+      if ('letterSpacing' in g) g.letterSpacing = '0px';
+    };
+    center('Please join us for', 230, 'italic 42px "Cormorant Garamond", Georgia, serif', soft);
+    center('the wedding of', 290, 'italic 56px "Cormorant Garamond", Georgia, serif', ink);
+    center('OLIVIA', 400, '400 104px "Cormorant Garamond", Georgia, serif', ink, 12);
+    center('Jacobson', 452, 'italic 40px "Cormorant Garamond", Georgia, serif', soft);
+    center('and', 520, 'italic 50px "Cormorant Garamond", Georgia, serif', ink);
+    center('BENJAMIN', 630, '400 104px "Cormorant Garamond", Georgia, serif', ink, 12);
+    center('Edwards', 682, 'italic 40px "Cormorant Garamond", Georgia, serif', soft);
+    // fecha con filete
+    g.strokeStyle = '#b08660'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(330, 790); g.lineTo(694, 790); g.stroke();
+    center('J A N   1 5   2 0 2 6', 760, '500 40px Montserrat, Arial, sans-serif', soft, 2);
+    center('at 4 o\'clock in the afternoon', 860, 'italic 40px "Cormorant Garamond", Georgia, serif', ink);
+    center('OLD FARMSTEAD', 1000, '400 58px "Cormorant Garamond", Georgia, serif', ink, 8);
+    center('123 Johnstown Road · Cambridge, Ohio', 1058, '400 34px Montserrat, Arial, sans-serif', soft, 1);
+    center('reception to follow', 1160, 'italic 44px "Cormorant Garamond", Georgia, serif', ink);
+    center('Reply by September 16', 1290, '400 30px Montserrat, Arial, sans-serif', soft, 3);
+
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding; t.anisotropy = 8;
+    return t;
+  }
+})();
+</script>
+</body>
+</html>
