@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Sobre con lazo desatándose</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#141f38; font-family: Montserrat, sans-serif; touch-action:none; }
+  #stage { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
+  #card {
+    position:absolute; width:min(88vw, 520px); aspect-ratio:1100/1550; top:50%; left:50%;
+    transform: translate(-50%, -50%);
+    background: linear-gradient(160deg,#1f2d4d,#101a31);
+    box-shadow: 0 30px 60px -20px rgba(0,0,0,.6);
+    border: 1px solid rgba(214,182,128,.35); border-radius:4px;
+  }
+  #card img { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; transform-origin: 50% 46.5%; will-change: transform, opacity; }
+  #ui { position:fixed; bottom:24px; left:0; right:0; text-align:center; }
+  button { font:500 12px Montserrat, sans-serif; letter-spacing:3px; text-transform:uppercase; padding:13px 28px; border:1px solid #d6b680; background:#fffdf8; color:#2a2a2a; border-radius:40px; cursor:pointer; }
+  #hint { margin-top:10px; font-size:11px; color:#c9b68e; letter-spacing:1px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="card">
+    <img data-part="cordTop" src="partes/cordTop.png" alt="">
+    <img data-part="cordBot" src="partes/cordBot.png" alt="">
+    <img data-part="tailL"   src="partes/tailL.png" alt="">
+    <img data-part="tailR"   src="partes/tailR.png" alt="">
+    <img data-part="loopL"   src="partes/loopL.png" alt="">
+    <img data-part="loopR"   src="partes/loopR.png" alt="">
+    <img data-part="seal"    src="partes/seal.png" alt="Sello S & J">
+  </div>
+</div>
+<div id="ui">
+  <button id="toggle">Desatar</button>
+  <div id="hint">Arrastra el lazo hacia abajo para desatarlo</div>
+</div>
+
+<script>
+(() => {
+  const parts = {};
+  document.querySelectorAll('#card img').forEach(img => parts[img.dataset.part] = img);
+  const btn = document.getElementById('toggle');
+  const card = document.getElementById('card');
+  const PULL = 260;
+  let target = 0, progress = 0, pull = null, dragging = false, startY = 0, acc = 0;
+
+  const ease = t => t < .5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+
+  // Cada pieza tiene su propio movimiento: los lazos se aflojan hacia los lados,
+  // las colas caen, los cordones se separan arriba y abajo, y el sello se abre al principio.
+  function render(p) {
+    const e = ease(p);
+    const fadeLate = clamp01((e - .6) / .4);
+    const set = (el, t, o) => { el.style.transform = t; el.style.opacity = o; };
+
+    set(parts.seal,
+      `translate(0, ${e * 3}%) scale(${1 - e * .25}) rotate(${e * 8}deg)`,
+      String(1 - clamp01((e - .55) / .45)));
+
+    set(parts.loopL,
+      `translate(${-14 * e}%, ${10 * e}%) rotate(${-38 * e}deg) scale(${1 - .35 * e})`,
+      String(1 - fadeLate * .6));
+    set(parts.loopR,
+      `translate(${14 * e}%, ${10 * e}%) rotate(${38 * e}deg) scale(${1 - .35 * e})`,
+      String(1 - fadeLate * .6));
+
+    set(parts.tailL,
+      `translate(${-10 * e}%, ${34 * e}%) rotate(${-22 * e}deg)`,
+      String(1 - fadeLate));
+    set(parts.tailR,
+      `translate(${10 * e}%, ${34 * e}%) rotate(${22 * e}deg)`,
+      String(1 - fadeLate));
+
+    set(parts.cordTop,
+      `translate(0, ${-70 * e}%)`,
+      String(1 - fadeLate));
+    set(parts.cordBot,
+      `translate(0, ${70 * e}%) rotate(${e * 2}deg)`,
+      String(1 - fadeLate));
+  }
+
+  function setTarget(t) {
+    target = t;
+    btn.textContent = target ? 'Atar' : 'Desatar';
+  }
+  btn.addEventListener('click', () => setTarget(target ? 0 : 1));
+
+  card.addEventListener('pointerdown', e => { dragging = true; startY = e.clientY; acc = 0; });
+  addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const dy = e.clientY - startY; startY = e.clientY;
+    if (dy > 0) { acc = Math.min(PULL, acc + dy); pull = acc / PULL; }
+  });
+  addEventListener('pointerup', () => {
+    if (!dragging) return;
+    dragging = false;
+    if (pull !== null) {
+      setTarget(pull > .5 ? 1 : 0);
+      pull = null;
+    }
+  });
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, .05); last = now;
+    if (pull !== null) progress = pull;
+    else if (progress < target) progress = Math.min(target, progress + dt / 1.6);
+    else if (progress > target) progress = Math.max(target, progress - dt / 1.6);
+    render(progress);
+    requestAnimationFrame(frame);
+  }
+  render(0);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
