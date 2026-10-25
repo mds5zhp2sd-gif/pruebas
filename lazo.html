@@ -45,14 +45,30 @@ addEventListener('error', e => showError(e.message));
 
   // Giro con el dedo o el ratón
   const pivot = new THREE.Group(); scene.add(pivot);
-  let rotX = -.15, rotY = 0, dragging = false, lx = 0, ly = 0;
-  renderer.domElement.addEventListener('pointerdown', e => { dragging = true; lx = e.clientX; ly = e.clientY; });
-  addEventListener('pointerup', () => dragging = false);
+  // Arrastrar hacia abajo "tira" del lazo y lo desata; al soltar, termina de desatarse o vuelve a atarse
+  let rotX = -.15, rotY = 0, dragging = false, lx = 0, ly = 0, pull = null, pullAcc = 0;
+  const PULL_DIST = 220;
+  renderer.domElement.addEventListener('pointerdown', e => { dragging = true; lx = e.clientX; ly = e.clientY; pullAcc = 0; });
+  addEventListener('pointerup', () => {
+    if (!dragging) return;
+    dragging = false;
+    if (pull !== null) {
+      target = pull > .5 ? 1 : 0;
+      pull = null;
+      btn.textContent = target ? 'Atar' : 'Desatar';
+    }
+  });
   addEventListener('pointermove', e => {
     if (!dragging) return;
-    rotY += (e.clientX - lx) * .006;
-    rotX = Math.max(-.7, Math.min(.7, rotX + (e.clientY - ly) * .006));
+    const dx = e.clientX - lx, dy = e.clientY - ly;
     lx = e.clientX; ly = e.clientY;
+    if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
+      pullAcc = Math.min(PULL_DIST, pullAcc + dy);
+      pull = pullAcc / PULL_DIST;
+    } else {
+      rotY += dx * .006;
+      rotX = Math.max(-.7, Math.min(.7, rotX + dy * .006));
+    }
   });
 
   // Luces: una principal con sombras suaves, relleno cálido y luz de ambiente
@@ -183,7 +199,8 @@ addEventListener('error', e => showError(e.message));
   function animate(now) {
     requestAnimationFrame(animate);
     const dt = Math.min((now - last)/1000, .05); last = now;
-    if (progress < target) progress = Math.min(target, progress + dt/duration);
+    if (pull !== null) progress = pull;
+    else if (progress < target) progress = Math.min(target, progress + dt/duration);
     else if (progress > target) progress = Math.max(target, progress - dt/duration);
     applyProgress(progress);
     pivot.rotation.set(rotX, rotY, 0);
